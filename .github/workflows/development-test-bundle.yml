@@ -36,7 +36,7 @@ jobs:
       - name: Build unsigned development App
         run: make --no-print-directory release
 
-      - name: Create development-test archive
+      - name: Create development-test disk image
         env:
           ARTIFACT_ROOT: ${{ runner.temp }}/Linnet-development-test
         run: |
@@ -56,14 +56,16 @@ jobs:
             'It is not a release, installer package, or supported update path.' \
             'Do not distribute it or use it to replace a normal Linnet installation.' \
             >"${ARTIFACT_ROOT}/README.txt"
-          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
-            "${ARTIFACT_ROOT}" "${RUNNER_TEMP}/Linnet-development-test-unsigned.zip"
-          /usr/bin/shasum -a 256 "${RUNNER_TEMP}/Linnet-development-test-unsigned.zip"
+          /usr/bin/hdiutil create -ov -format UDZO \
+            -volname 'Linnet Development Test' \
+            -srcfolder "${ARTIFACT_ROOT}" \
+            "${RUNNER_TEMP}/Linnet-development-test-unsigned.dmg"
+          /usr/bin/shasum -a 256 "${RUNNER_TEMP}/Linnet-development-test-unsigned.dmg"
 
-      - name: Upload unsigned development-test archive
+      - name: Upload unsigned development-test disk image
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: Linnet-development-test-unsigned
-          path: ${{ runner.temp }}/Linnet-development-test-unsigned.zip
+          path: ${{ runner.temp }}/Linnet-development-test-unsigned.dmg
           if-no-files-found: error
           retention-days: 7
