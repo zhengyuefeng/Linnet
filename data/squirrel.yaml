@@ -12,6 +12,9 @@ keyboard_layout: last
 # options: always | never | appropriate
 show_notifications_when: appropriate
 
+status_icon:
+  show: false
+
 style:
   color_scheme: linnet_paper_light
   color_scheme_dark: linnet_paper_dark
