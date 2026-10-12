@@ -36,36 +36,85 @@ jobs:
       - name: Build unsigned development App
         run: make --no-print-directory release
 
-      - name: Create development-test disk image
+      - name: Create ad-hoc development input-method package
         env:
-          ARTIFACT_ROOT: ${{ runner.temp }}/Linnet-development-test
+          PACKAGE_ROOT: ${{ runner.temp }}/Linnet-development-test-package
         run: |
           set -euo pipefail
-          app="build/Local/Build/Products/Release/Linnet.app"
-          test -d "${app}"
+          source_app="build/Local/Build/Products/Release/Linnet.app"
+          test -d "${source_app}"
           production_bundle_identifier="$(sed -n 's/^LINNET_BUNDLE_IDENTIFIER = //p' config/LinnetProduct.xcconfig)"
           test -n "${production_bundle_identifier}"
-          test "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "${app}/Contents/Info.plist")" = \
+          test "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "${source_app}/Contents/Info.plist")" = \
             "${production_bundle_identifier}.local-build"
-          mkdir -p "${ARTIFACT_ROOT}"
-          /bin/cp -R "${app}" "${ARTIFACT_ROOT}/Linnet.app"
-          printf '%s\n' \
-            'Linnet development-test build' \
-            '' \
-            'This archive is unsigned and uses a local-build bundle identifier.' \
-            'It is not a release, installer package, or supported update path.' \
-            'Do not distribute it or use it to replace a normal Linnet installation.' \
-            >"${ARTIFACT_ROOT}/README.txt"
-          /usr/bin/hdiutil create -ov -format UDZO \
-            -volname 'Linnet Development Test' \
-            -srcfolder "${ARTIFACT_ROOT}" \
-            "${RUNNER_TEMP}/Linnet-development-test-unsigned.dmg"
-          /usr/bin/shasum -a 256 "${RUNNER_TEMP}/Linnet-development-test-unsigned.dmg"
 
-      - name: Upload unsigned development-test disk image
+          payload_root="${PACKAGE_ROOT}/payload"
+          scripts_root="${PACKAGE_ROOT}/scripts"
+          component_package="${PACKAGE_ROOT}/Linnet Development.component.pkg"
+          distribution="${PACKAGE_ROOT}/Distribution.xml"
+          output_package="${RUNNER_TEMP}/Linnet-development-test-unsigned.pkg"
+          development_app="${payload_root}/Linnet Development.app"
+          package_identifier="${production_bundle_identifier}.local-build.development-test.pkg"
+          version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "${source_app}/Contents/Info.plist")"
+          test -n "${version}"
+
+          mkdir -p "${payload_root}" "${scripts_root}"
+          /usr/bin/ditto "${source_app}" "${development_app}"
+          while IFS= read -r -d '' binary; do
+            /usr/bin/codesign --force --sign - --timestamp=none "${binary}"
+          done < <(find "${development_app}/Contents/Applications/Settings.app/Contents/Frameworks" \
+            -type f -name '*.dylib' -print0)
+          /usr/bin/codesign --force --sign - --timestamp=none \
+            "${development_app}/Contents/Applications/Settings.app"
+          while IFS= read -r -d '' binary; do
+            /usr/bin/codesign --force --sign - --timestamp=none "${binary}"
+          done < <(find "${development_app}/Contents/Frameworks" \
+            -type f -name '*.dylib' -print0)
+          /usr/bin/codesign --force --sign - --timestamp=none "${development_app}"
+          /usr/bin/codesign --verify --deep --strict "${development_app}"
+
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'set -euo pipefail' \
+            'app_path="${HOME}/Library/Input Methods/Linnet Development.app"' \
+            'executable="${app_path}/Contents/MacOS/Linnet"' \
+            'if [[ ! -x "${executable}" ]]; then' \
+            '  echo "Linnet Development Test: installed App is unavailable" >&2' \
+            '  exit 1' \
+            'fi' \
+            'if ! "${executable}" --request-first-install-authorization; then' \
+            '  echo "Linnet Development Test: registration was not completed; enable it in System Settings > Keyboard > Input Sources." >&2' \
+            'fi' \
+            >"${scripts_root}/postinstall"
+          /bin/chmod 0755 "${scripts_root}/postinstall"
+
+          /usr/bin/pkgbuild --compression latest --min-os-version 13.0 \
+            --root "${payload_root}" --identifier "${package_identifier}" \
+            --version "${version}" --install-location '/Library/Input Methods' \
+            --scripts "${scripts_root}" "${component_package}"
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="utf-8"?>' \
+            '<installer-gui-script minSpecVersion="2">' \
+            '  <title>Linnet Development Test (ad-hoc signed)</title>' \
+            '  <options customize="never" require-scripts="false" hostArchitectures="arm64"/>' \
+            '  <domains enable_localSystem="false" enable_currentUserHome="true" enable_anywhere="false"/>' \
+            '  <os-version min="13.0"/>' \
+            '  <choices-outline><line choice="development"/></choices-outline>' \
+            '  <choice id="development" visible="false">' \
+            "    <pkg-ref id=\"${package_identifier}\"/>" \
+            '  </choice>' \
+            "  <pkg-ref id=\"${package_identifier}\" version=\"${version}\">Linnet Development.component.pkg</pkg-ref>" \
+            '</installer-gui-script>' \
+            >"${distribution}"
+          /usr/bin/productbuild --distribution "${distribution}" \
+            --package-path "${PACKAGE_ROOT}" "${output_package}"
+          /usr/sbin/pkgutil --check-signature "${output_package}"
+          /usr/bin/shasum -a 256 "${output_package}"
+
+      - name: Upload ad-hoc development input-method package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          name: Linnet-development-test-unsigned
-          path: ${{ runner.temp }}/Linnet-development-test-unsigned.dmg
+          name: Linnet-development-test-input-method-pkg
+          path: ${{ runner.temp }}/Linnet-development-test-unsigned.pkg
           if-no-files-found: error
           retention-days: 7
