@@ -1,0 +1,69 @@
+name: Linnet development test bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linnet-development-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Restore locked build cache
+        uses: ./.github/actions/restore-locked-build-cache
+        with:
+          save: true
+
+      - name: Install declared build tools
+        run: scripts/install_ci_build_tools.sh quality
+
+      - name: Hydrate locked inputs
+        run: ./action-install.sh
+
+      - name: Build unsigned development App
+        run: make --no-print-directory release
+
+      - name: Create development-test archive
+        env:
+          ARTIFACT_ROOT: ${{ runner.temp }}/Linnet-development-test
+        run: |
+          set -euo pipefail
+          app="build/Local/Build/Products/Release/Linnet.app"
+          test -d "${app}"
+          production_bundle_identifier="$(sed -n 's/^LINNET_BUNDLE_IDENTIFIER = //p' config/LinnetProduct.xcconfig)"
+          test -n "${production_bundle_identifier}"
+          test "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "${app}/Contents/Info.plist")" = \
+            "${production_bundle_identifier}.local-build"
+          mkdir -p "${ARTIFACT_ROOT}"
+          /bin/cp -R "${app}" "${ARTIFACT_ROOT}/Linnet.app"
+          printf '%s\n' \
+            'Linnet development-test build' \
+            '' \
+            'This archive is unsigned and uses a local-build bundle identifier.' \
+            'It is not a release, installer package, or supported update path.' \
+            'Do not distribute it or use it to replace a normal Linnet installation.' \
+            >"${ARTIFACT_ROOT}/README.txt"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTIFACT_ROOT}" "${RUNNER_TEMP}/Linnet-development-test-unsigned.zip"
+          /usr/bin/shasum -a 256 "${RUNNER_TEMP}/Linnet-development-test-unsigned.zip"
+
+      - name: Upload unsigned development-test archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: Linnet-development-test-unsigned
+          path: ${{ runner.temp }}/Linnet-development-test-unsigned.zip
+          if-no-files-found: error
+          retention-days: 7
