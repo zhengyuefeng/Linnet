@@ -108,7 +108,13 @@ jobs:
             >"${distribution}"
           /usr/bin/productbuild --distribution "${distribution}" \
             --package-path "${PACKAGE_ROOT}" "${output_package}"
-          /usr/sbin/pkgutil --check-signature "${output_package}"
+          if signature="$(/usr/sbin/pkgutil --check-signature "${output_package}" 2>&1)"; then
+            printf '%s\n' "${signature}" >&2
+            echo 'Linnet Development Test: the PKG unexpectedly has an installer signature' >&2
+            exit 1
+          fi
+          printf '%s\n' "${signature}"
+          grep -Fqx '   Status: no signature' <<<"${signature}"
           /usr/bin/shasum -a 256 "${output_package}"
 
       - name: Upload ad-hoc development input-method package
